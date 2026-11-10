@@ -49,8 +49,6 @@ Each file has a header row added for the attribute names. Missing values are mar
 
 The primary task is binary (`num > 0`). Predicting the severity level is a secondary task.
 
-The header row in our data files spells the ECG column `restcg`. The code renames it to `restecg` when loading.
-
 ### Data quality notes
 
 Cleveland is nearly complete. The other three sites are not:
@@ -72,11 +70,15 @@ CPTS_437_Heart_Disease_Prediction/
 │   ├── processed.switzerland.data
 │   └── processed.va.data
 └── results/                 # created automatically when the scripts run
+    ├── baseline_results_<tag>.csv
+    ├── baseline_<tag>.png
+    ├── confusion_<tag>.png
+    └── confusion_<model>_<tag>.csv
 ```
 
 ## Setup
 
-Requires Python 3.9+ and scikit-learn 1.2 or newer.
+Requires Python 3.9+, scikit-learn 1.2 or newer, and matplotlib 3.5 or newer.
 
 ```bash
 git clone https://github.com/ragz743/CPTS_437_Heart_Disease_Prediction.git
@@ -94,7 +96,9 @@ python baseline_model.py --quick                   # small search grids for a fa
 python baseline_model.py --folds 10 --jobs 4       # 10 CV folds, limit to 4 CPU cores
 ```
 
-Paths are resolved from the script's location, so it reads `data/` and writes `results/` correctly from any working directory. A full run takes a few minutes on a single core and is faster with more cores.
+Paths are resolved from the script's location, so it reads `data/` and writes `results/` correctly from any working directory. A full run takes about 30–60 seconds on a multi-core laptop and a few minutes on a single core. `--quick` finishes in a few seconds.
+
+The multiclass run prints a few scikit-learn warnings that the least populated class has fewer members than the number of folds. This is expected: some sites have only a handful of `num = 4` patients.
 
 ### Outputs
 
@@ -104,7 +108,8 @@ Each run writes the following to `results/`:
 | --- | --- |
 | `baseline_results_<tag>.csv` | Every metric for every model and evaluation setting |
 | `baseline_<tag>.png` | Recall and F1 bar charts: pooled CV vs. each held-out region |
-| `confusion_<model>_<tag>.csv` | Out-of-fold confusion matrix on the pooled data |
+| `confusion_<tag>.png` | Heatmaps of the pooled out-of-fold confusion matrices for Logistic Regression and Decision Tree |
+| `confusion_<model>_<tag>.csv` | Out-of-fold confusion matrix on the pooled data (raw counts) |
 
 `<tag>` is the task name plus any dropped features (for example `binary_no_ca_thal`), so different runs don't overwrite each other. The script also prints each results table and the tuned hyperparameters to the console.
 
@@ -164,3 +169,43 @@ Hyperparameters are chosen with an inner `GridSearchCV` inside each outer traini
 4. **Cleveland only:** train on Cleveland and test on each other site, mirroring how most published models are built.
 
 **Metrics.** Accuracy, precision, recall, F1 and ROC-AUC for the binary task. Macro-averaged precision, recall and F1 for the multiclass task. Recall (sensitivity) is prioritized because a missed diagnosis is costlier than a false alarm.
+
+## Baseline results
+
+From a full run (`python baseline_model.py`, 5 outer and 5 inner folds, seed 42). The complete tables are in `results/baseline_results_<tag>.csv`.
+
+### Pooled 5-fold CV (binary)
+
+| Model | Accuracy | Precision | Recall | F1 | ROC-AUC |
+| --- | --- | --- | --- | --- | --- |
+| Majority class | 0.553 | 0.553 | 1.000 | 0.712 | 0.500 |
+| Logistic Regression | 0.811 | 0.828 | 0.829 | 0.828 | 0.897 |
+| Decision Tree | 0.746 | 0.761 | 0.790 | 0.774 | 0.811 |
+
+### Leave-one-cohort-out (binary, F1 / recall)
+
+| Held-out site | Logistic Regression | Decision Tree |
+| --- | --- | --- |
+| Cleveland | 0.588 / 0.432 | 0.676 / 0.719 |
+| Hungary | 0.756 / 0.802 | 0.674 / 0.849 |
+| Switzerland | 0.833 / 0.739 | 0.835 / 0.748 |
+| VA Long Beach | 0.828 / 0.839 | 0.710 / 0.624 |
+
+![Pooled CV vs. leave-one-cohort-out](results/baseline_binary.png)
+
+### Confusion matrices (pooled, out-of-fold)
+
+Each cell shows the patient count and its share of the true class. Logistic Regression misses 87 of 509 patients with heart disease (17%), and the Decision Tree misses 107 (21%).
+
+![Binary confusion matrices](results/confusion_binary.png)
+
+On the multiclass task, both models separate `num = 0` from disease reasonably well but confuse the severity levels 1–4 with each other (macro F1 0.37 for Logistic Regression, 0.36 for the Decision Tree).
+
+![Multiclass confusion matrices](results/confusion_multiclass.png)
+
+### Key findings
+
+- **Pooled CV is optimistic.** Logistic Regression reaches 0.83 F1 when patients from every site are mixed into each fold, but recall falls to 0.43 when Cleveland is held out.
+- **Cleveland-only models transfer poorly.** Trained on Cleveland alone, Logistic Regression detects only 40–49% of disease cases at the other three sites, and the Decision Tree as little as 23% (VA Long Beach).
+- **Dropping `ca` and `thal` helps transfer.** With those features excluded (`--drop-features ca thal`), pooled F1 drops slightly (0.828 → 0.815) but LOCO F1 on Cleveland rises from 0.588 to 0.743, since the model can no longer lean on features that are almost always missing at the other sites.
+- **Switzerland is hard to judge.** 93.5% of its patients have heart disease, so the majority-class baseline scores 0.966 F1 within that site.
