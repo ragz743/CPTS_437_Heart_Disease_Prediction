@@ -7,7 +7,6 @@
 import argparse
 import glob
 import os
-import warnings
 
 # Import third-party libraries
 import numpy as np
@@ -530,8 +529,12 @@ def plot_confusion_matrices(matrices, task, out_path):
                 # Light text on dark cells, dark text on light cells
                 color = "white" if share[i, j] > 0.55 else "#1f1f1f"
                 ax.text(
-                    j, i, f"{cm[i, j]}\n{100 * share[i, j]:.0f}%",
-                    ha="center", va="center", color=color,
+                    j,
+                    i,
+                    f"{cm[i, j]}\n{100 * share[i, j]:.0f}%",
+                    ha="center",
+                    va="center",
+                    color=color,
                     fontsize=11 if n_classes == 2 else 9,
                 )
         ax.set_xticks(range(n_classes), labels)
